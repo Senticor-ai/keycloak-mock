@@ -1,0 +1,55 @@
+{
+  "name": "@senticor-ai/keycloak-mock",
+  "version": "0.1.0",
+  "description": "Strict TypeScript ESM Keycloak/OIDC mock for integration tests.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Senticor AI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Senticor-ai/keycloak-mock.git"
+  },
+  "homepage": "https://github.com/Senticor-ai/keycloak-mock#readme",
+  "bugs": {
+    "url": "https://github.com/Senticor-ai/keycloak-mock/issues"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "packageManager": "pnpm@11.1.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "keycloak-mock": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist coverage",
+    "prepack": "pnpm run clean && pnpm run build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "selfsigned": "^5.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.9"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

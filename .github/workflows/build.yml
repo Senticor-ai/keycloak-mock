@@ -1,10 +1,7 @@
-name: Java CI
+name: Java Reference CI
 
 on:
-  push:
-    branches:
-      - 'main'
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   check_commit_hooks:
