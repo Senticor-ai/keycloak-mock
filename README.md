@@ -6,6 +6,8 @@ This package ports the useful runtime behavior of `TNG/keycloak-mock` from the J
 
 The existing Java/Gradle sources are kept as reference material while Vitest coverage is brought to parity. They are not part of the supported package surface, and Java CI is manual-only.
 
+Java-to-Vitest parity decisions are tracked in [docs/test-parity.md](docs/test-parity.md).
+
 ## Install
 
 ```bash
@@ -93,6 +95,7 @@ Useful options:
 ```bash
 pnpm install --frozen-lockfile
 pnpm test
+pnpm coverage
 pnpm build
 pnpm pack --dry-run
 pnpm publish --access public
