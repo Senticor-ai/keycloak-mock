@@ -249,6 +249,142 @@ describe("KeycloakMock HTTP server", () => {
     expect(oobLocation.searchParams.get("code")).toBeTruthy();
   });
 
+  it("supports Java-style relative redirect_uri values", async () => {
+    const mock = await startMock(aServerConfig().withRandomPort().withDefaultRealm("realm").build());
+    const base = mockBaseUrl(mock);
+    const login = await openLoginPage(base, "redirect-uri", "state", "nonce", "id_token");
+
+    const auth = await authenticate(login.action, "username", "role1,role2,role3");
+    const location = auth.headers.get("location") as string;
+    const cookie = getSetCookie(auth, "KEYCLOAK_SESSION");
+    const sessionId = expectSessionCookie(cookie, "realm");
+
+    expect(location).toMatch(/^redirect-uri#/u);
+    const redirect = new URL(location, "http://dummy.local");
+    const fragment = new URLSearchParams(redirect.hash.slice(1));
+    expect(fragment.get("state")).toBe("state");
+    expect(fragment.get("session_state")).toBe(sessionId);
+    expectLoginClaims(mock, fragment.get("id_token") as string, {
+      preferredUsername: "username",
+      nonce: "nonce",
+      roles: ["role1", "role2", "role3"]
+    });
+  });
+
+  it.each([
+    ["code", undefined, "query", ["code"], []],
+    ["code", "fragment", "fragment", ["code"], []],
+    ["code", "query", "query", ["code"], []],
+    ["id_token", undefined, "fragment", ["id_token"], []],
+    ["id_token", "fragment", "fragment", ["id_token"], []],
+    ["id_token", "query", "fragment", ["id_token"], []],
+    ["id_token token", undefined, "fragment", ["id_token", "access_token", "token_type"], []],
+    ["id_token token", "fragment", "fragment", ["id_token", "access_token", "token_type"], []],
+    ["id_token token", "query", "fragment", ["id_token", "access_token", "token_type"], []],
+    ["token id_token", undefined, "fragment", ["id_token", "access_token", "token_type"], []],
+    ["none", undefined, "query", [], ["id_token", "access_token", "token_type", "code"]],
+    ["none", "fragment", "fragment", [], ["id_token", "access_token", "token_type", "code"]],
+    ["none", "query", "query", [], ["id_token", "access_token", "token_type", "code"]]
+  ] as const)(
+    "matches Java redirect behavior for response_type=%s response_mode=%s",
+    async (responseType, responseMode, expectedMode, expectedParams, absentParams) => {
+      const mock = await startMock(aServerConfig().withRandomPort().withDefaultRealm("realm").build());
+      const base = mockBaseUrl(mock);
+      const params: Record<string, string> = {
+        client_id: "client",
+        redirect_uri: "https://localhost:1234/gohere",
+        state: "state123",
+        nonce: "nonce123",
+        response_type: responseType
+      };
+      if (responseMode !== undefined) {
+        params.response_mode = responseMode;
+      }
+
+      const login = await openLoginPageWithParams(base, params);
+      const auth = await authenticate(login.action, "username", "role1,role2,role3");
+      const sessionId = expectSessionCookie(getSetCookie(auth, "KEYCLOAK_SESSION"), "realm");
+      const location = auth.headers.get("location") as string;
+      const redirect = new URL(location);
+      const responseParams = expectedMode === "query" ? redirect.searchParams : new URLSearchParams(redirect.hash.slice(1));
+
+      expect(redirect.origin + redirect.pathname).toBe("https://localhost:1234/gohere");
+      expect(expectedMode === "query" ? redirect.hash : redirect.search).toBe("");
+      expect(responseParams.get("session_state")).toBe(sessionId);
+      expect(responseParams.get("state")).toBe("state123");
+      for (const parameter of expectedParams) {
+        expect(responseParams.get(parameter), parameter).toBeTruthy();
+      }
+      for (const parameter of absentParams) {
+        expect(responseParams.has(parameter), parameter).toBe(false);
+      }
+      if (responseParams.has("code")) {
+        expect(responseParams.get("code")).toBe(sessionId);
+      }
+      if (responseParams.has("token_type")) {
+        expect(responseParams.get("token_type")).toBe("bearer");
+      }
+      if (responseParams.has("id_token")) {
+        expectLoginClaims(mock, responseParams.get("id_token") as string, {
+          preferredUsername: "username",
+          nonce: "nonce123",
+          roles: ["role1", "role2", "role3"]
+        });
+      }
+      if (responseParams.has("access_token")) {
+        expect(responseParams.get("access_token")).toBe(responseParams.get("id_token"));
+      }
+    }
+  );
+
+  it.each([
+    [
+      "https://localhost:1234/gohere#existingFragment",
+      "query",
+      "https://localhost:1234/gohere?session_state=__SESSION__&state=state123&code=__SESSION__#existingFragment"
+    ],
+    [
+      "https://localhost:1234/gohere#existingFragment",
+      "fragment",
+      "https://localhost:1234/gohere#existingFragment&session_state=__SESSION__&state=state123&code=__SESSION__"
+    ],
+    [
+      "https://localhost:1234/gohere?existingQuery=true",
+      "query",
+      "https://localhost:1234/gohere?existingQuery=true&session_state=__SESSION__&state=state123&code=__SESSION__"
+    ],
+    [
+      "https://localhost:1234/gohere?existingQuery=true",
+      "fragment",
+      "https://localhost:1234/gohere?existingQuery=true#session_state=__SESSION__&state=state123&code=__SESSION__"
+    ],
+    [
+      "https://localhost:1234/gohere?existingQuery=true#existingFragment",
+      "query",
+      "https://localhost:1234/gohere?existingQuery=true&session_state=__SESSION__&state=state123&code=__SESSION__#existingFragment"
+    ],
+    [
+      "https://localhost:1234/gohere?existingQuery=true#existingFragment",
+      "fragment",
+      "https://localhost:1234/gohere?existingQuery=true#existingFragment&session_state=__SESSION__&state=state123&code=__SESSION__"
+    ]
+  ])("preserves existing redirect parameters for %s with %s response mode", async (redirectUri, responseMode, expectedTemplate) => {
+    const mock = await startMock(aServerConfig().withRandomPort().withDefaultRealm("realm").build());
+    const base = mockBaseUrl(mock);
+    const login = await openLoginPageWithParams(base, {
+      client_id: "client",
+      redirect_uri: redirectUri,
+      state: "state123",
+      nonce: "nonce123",
+      response_type: "code",
+      response_mode: responseMode
+    });
+    const auth = await authenticate(login.action, "username", "role");
+    const sessionId = expectSessionCookie(getSetCookie(auth, "KEYCLOAK_SESSION"), "realm");
+
+    expect(auth.headers.get("location")).toBe(expectedTemplate.replaceAll("__SESSION__", sessionId));
+  });
+
   it("supports password and client-credentials token grants", async () => {
     const mock = await startMock(
       aServerConfig().withRandomPort().withDefaultRealm("realm").withLoginRoleMapping(LoginRoleMapping.TO_BOTH).build()
@@ -342,6 +478,7 @@ describe("KeycloakMock HTTP server", () => {
     const html = await (await fetch(docsUrl)).text();
     expect(html).toContain("/docs");
     expect(html).toContain("/auth/realms/:realm/protocol/openid-connect/token");
+    expect(html).toContain("    <tr>\n      <td>GET</td>\n      <td>/docs</td>\n      <td>documentation endpoint</td>\n    </tr>");
 
     const json = (await (await fetch(docsUrl, { headers: { accept: "application/json" } })).json()) as Record<string, unknown>;
     expect(json).toHaveProperty("/docs");
