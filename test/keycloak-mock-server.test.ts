@@ -281,12 +281,25 @@ describe("KeycloakMock HTTP server", () => {
     );
     expectGrantClaims(mock, clientCredentialsByBasic.access_token as string, "client", ["client", "server"], ["role1", "role2", "role3"]);
 
+    const clientCredentialsByBasicUsernameOnly = await postForm(
+      tokenUrl,
+      { grant_type: "client_credentials" },
+      { authorization: basicAuth("client") }
+    );
+    expectGrantClaims(mock, clientCredentialsByBasicUsernameOnly.access_token as string, "client", ["client", "server"], []);
+
     const clientCredentialsByForm = await postForm(tokenUrl, {
       client_id: "client",
       client_secret: "role1,role2,role3",
       grant_type: "client_credentials"
     });
     expectGrantClaims(mock, clientCredentialsByForm.access_token as string, "client", ["client", "server"], ["role1", "role2", "role3"]);
+
+    const clientCredentialsByFormClientOnly = await postForm(tokenUrl, {
+      client_id: "client",
+      grant_type: "client_credentials"
+    });
+    expectGrantClaims(mock, clientCredentialsByFormClientOnly.access_token as string, "client", ["client", "server"], []);
   });
 
   it("returns Java-compatible token grant errors", async () => {
@@ -300,6 +313,26 @@ describe("KeycloakMock HTTP server", () => {
     await expectFormStatus(tokenUrl, { grant_type: "password", client_id: "client" }, 400);
     await expectFormStatus(tokenUrl, { grant_type: "client_credentials" }, 401);
     await expectFormStatus(tokenUrl, { grant_type: "client_credentials" }, 401, { authorization: "Basic but not base64" });
+  });
+
+  it("rejects unsupported redirect response types after authentication", async () => {
+    const mock = await startMock(aServerConfig().withRandomPort().withDefaultRealm("realm").build());
+    const base = mockBaseUrl(mock);
+    const login = await openLoginPageWithParams(base, {
+      client_id: "client",
+      redirect_uri: "http://app.local/callback",
+      response_type: "unsupported"
+    });
+
+    const response = await fetch(login.action, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username: "username", password: "role" }),
+      redirect: "manual"
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("Invalid redirect request");
   });
 
   it("serves documentation as HTML and JSON", async () => {
