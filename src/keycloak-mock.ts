@@ -444,22 +444,19 @@ export class KeycloakMock {
       session.getRedirectUri() === "urn:ietf:wg:oauth:2.0:oob"
         ? requestConfiguration.getOutOfBandLoginLoginEndpoint()
         : session.getRedirectUri();
-
-    let redirectUrl: URL;
-    try {
-      redirectUrl = new URL(redirectUriBase);
-    } catch {
+    const redirectUri = splitRedirectUri(redirectUriBase);
+    if (redirectUri === undefined) {
       return undefined;
     }
 
     const responseMode = validResponseMode(responseType, session.getResponseMode());
     const parameters = this.getRedirectParameters(session, requestConfiguration, responseType);
     if (responseMode === "fragment") {
-      redirectUrl.hash = appendParameters(redirectUrl.hash.replace(/^#/u, ""), parameters);
+      redirectUri.fragment = appendParameters(redirectUri.fragment, parameters);
     } else {
-      redirectUrl.search = appendParameters(redirectUrl.search.replace(/^\?/u, ""), parameters);
+      redirectUri.query = appendParameters(redirectUri.query, parameters);
     }
-    return redirectUrl.toString();
+    return joinRedirectUri(redirectUri);
   }
 
   private getRedirectParameters(session: PersistentSession, requestConfiguration: UrlConfiguration, responseType: ResponseType): string[] {
@@ -595,6 +592,38 @@ function appendParameters(existingParameters: string, newParameters: readonly st
   return `${existingParameters}&${parameterString}`;
 }
 
+interface SplitRedirectUri {
+  base: string;
+  query: string;
+  fragment: string;
+  hasQuery: boolean;
+  hasFragment: boolean;
+}
+
+function splitRedirectUri(uri: string): SplitRedirectUri | undefined {
+  if (uri === "") {
+    return undefined;
+  }
+
+  const fragmentIndex = uri.indexOf("#");
+  const beforeFragment = fragmentIndex < 0 ? uri : uri.slice(0, fragmentIndex);
+  const fragment = fragmentIndex < 0 ? "" : uri.slice(fragmentIndex + 1);
+  const queryIndex = beforeFragment.indexOf("?");
+  return {
+    base: queryIndex < 0 ? beforeFragment : beforeFragment.slice(0, queryIndex),
+    query: queryIndex < 0 ? "" : beforeFragment.slice(queryIndex + 1),
+    fragment,
+    hasQuery: queryIndex >= 0,
+    hasFragment: fragmentIndex >= 0
+  };
+}
+
+function joinRedirectUri(uri: SplitRedirectUri): string {
+  const query = uri.query !== "" || uri.hasQuery ? `?${uri.query}` : "";
+  const fragment = uri.fragment !== "" || uri.hasFragment ? `#${uri.fragment}` : "";
+  return `${uri.base}${query}${fragment}`;
+}
+
 async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
   if (!["POST", "PUT", "PATCH"].includes(request.method ?? "")) {
     return new URLSearchParams();
@@ -715,10 +744,13 @@ function thirdPartyCookiesHtml(step: string): string {
 }
 
 function docsHtml(routes: Record<string, { methods: string[]; description: string }>): string {
-  const items = Object.entries(routes)
-    .map(([path, route]) => `<li><code>${escapeHtml(path)}</code> ${escapeHtml(route.methods.join(","))} ${escapeHtml(route.description)}</li>`)
+  const rows = Object.entries(routes)
+    .map(
+      ([path, route]) =>
+        `    <tr>\n      <td>${escapeHtml(route.methods.join(", "))}</td>\n      <td>${escapeHtml(path)}</td>\n      <td>${escapeHtml(route.description)}</td>\n    </tr>`
+    )
     .join("");
-  return `<!doctype html><html><head><title>Keycloak Mock Routes</title></head><body><h1>Routes</h1><ul>${items}</ul></body></html>`;
+  return `<!doctype html><html><head><title>Documentation</title></head><body><h1>Keycloak Mock API</h1><p>These are the endpoints that are currently supported by Keycloak Mock.</p><table><tr><th>Methods</th><th>Path</th><th>Description</th></tr>${rows}</table></body></html>`;
 }
 
 function documentedRoutes(contextPath: string): Record<string, { methods: string[]; description: string }> {
